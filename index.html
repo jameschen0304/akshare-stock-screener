@@ -44,7 +44,7 @@
         </label>
         <label>
           <span>并发线程数</span>
-          <input type="number" name="max_workers" value="6" min="1" max="16" />
+          <input type="number" name="max_workers" value="3" min="1" max="8" />
         </label>
         <label>
           <span>最低流动比率</span>
@@ -58,7 +58,7 @@
           <span class="hint-inline">提示：收入连增 4 年时，请把「展示报告期数」设为 ≥8；PE 5–25 + 硬性规则较严，可先取消硬性规则试跑。</span>
         </label>
         <label class="checkbox-row">
-          <input type="checkbox" name="apply_hard_rules" checked />
+          <input type="checkbox" name="apply_hard_rules" />
           <span>仅保留通过硬性规则的股票（流动比率 + 连续年报收入递增）</span>
         </label>
         <label class="checkbox-row">
@@ -134,8 +134,8 @@
   <footer class="footer">
     <p>数据来自东方财富 · 由 akshare 拉取 · 仅供研究，不构成投资建议</p>
   </footer>
-  <script src="config.js?v=8"></script>
-  <script src="screener-core.js?v=8"></script>
-  <script src="app.js?v=8"></script>
+  <script src="config.js?v=9"></script>
+  <script src="screener-core.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

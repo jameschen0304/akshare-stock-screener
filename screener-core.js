@@ -123,7 +123,8 @@
     return `${(v * 100).toFixed(2)}%`;
   }
 
-  async function emFetchRaw(url, headerOverrides) {
+  async function emFetchRaw(url, headerOverrides, options) {
+    const allowHtml = options?.allowHtml === true;
     const headers = { ...EM_HEADERS, ...(headerOverrides || {}) };
     const errors = [];
     try {
@@ -133,7 +134,7 @@
         headers,
       });
       const text = await r.text();
-      if (r.ok && !isHtmlBody(text)) return text;
+      if (r.ok && (allowHtml || !isHtmlBody(text))) return text;
       errors.push(
         r.ok ? "直连返回 HTML" : `直连 HTTP ${r.status}`
       );
@@ -171,10 +172,29 @@
     );
   }
 
-  async function emFetchJson(url, params, headerOverrides, label) {
+  async function emFetchJson(url, params, headerOverrides, label, options) {
     const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    const text = await emFetchRaw(url + qs, headerOverrides);
+    const text = await emFetchRaw(url + qs, headerOverrides, options);
     return parseEmJson(text, label);
+  }
+
+  function normalizeDiff(diff) {
+    if (!diff) return [];
+    if (Array.isArray(diff)) return diff;
+    return Object.values(diff);
+  }
+
+  function pickDeductFromRow(row) {
+    for (const col of [
+      "DEDUCT_PARENT_NETPROFIT",
+      "DEDUCT_NETPROFIT",
+      "PARENT_NETPROFIT",
+      "NETPROFIT",
+    ]) {
+      const v = num(row[col]);
+      if (v != null) return v;
+    }
+    return null;
   }
 
   async function emFetchJsonRetry(
@@ -238,7 +258,7 @@
         ...CLIST_BASE_PARAMS,
         pn: String(pn),
       });
-      const diff = data?.data?.diff || [];
+      const diff = normalizeDiff(data?.data?.diff);
       const per = diff.length || CLIST_PAGE_SIZE;
       _universeTotalPages = Math.ceil((data?.data?.total || per) / per);
       _universeRaw.push(...diff);
@@ -291,10 +311,12 @@
 
   async function getCompanyType(emSymbol) {
     const url = `https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/Index?type=web&code=${emSymbol.toLowerCase()}`;
-    const html = await emFetchRaw(url, DC_HEADERS);
+    const html = await emFetchRaw(url, DC_HEADERS, { allowHtml: true });
     const doc = new DOMParser().parseFromString(html, "text/html");
     const el = doc.querySelector("#hidctype");
-    return el?.getAttribute("value") || "4";
+    if (el?.getAttribute("value")) return el.getAttribute("value");
+    const m = html.match(/id=["']hidctype["'][^>]*value=["'](\d+)["']/i);
+    return m ? m[1] : "4";
   }
 
   async function fetchSheetDatacenter(emSymbol, kind) {
@@ -383,8 +405,11 @@
       }
       const rec = map.get(rd);
       for (const [k, col] of Object.entries(PROFIT_FIELDS)) {
+        if (k === "deduct_net_parent") continue;
         if (row[col] != null) rec[k] = num(row[col]);
       }
+      const deduct = pickDeductFromRow(row);
+      if (deduct != null) rec.deduct_net_parent = deduct;
     }
     return [...map.values()].sort((a, b) =>
       a.report_date < b.report_date ? 1 : -1
@@ -499,14 +524,8 @@
     ) {
       reasons.push(`流动比率<${cfg.min_current_ratio}`);
     }
-    const needYears = cfg.revenue_growth_years;
-    const maxYearsFromPeriods = Math.max(2, Math.floor((cfg.periods || 6) / 2));
-    if (needYears > maxYearsFromPeriods) {
-      reasons.push(
-        `收入连增需${needYears}个年报，请把「展示报告期数」调到至少 ${needYears * 2} 或降低连增年数`
-      );
-    } else if (!annualRevenueIncreasing(profitRows, needYears)) {
-      reasons.push(`最近${needYears}个年报收入未连增`);
+    if (!annualRevenueIncreasing(profitRows, cfg.revenue_growth_years)) {
+      reasons.push(`最近${cfg.revenue_growth_years}个年报收入未连增`);
     }
     return { ok: reasons.length === 0, reasons };
   }
@@ -588,15 +607,17 @@
         return state;
       }
 
-      const concurrency = Math.min(cfg.max_workers || 3, 4);
+      const concurrency = Math.min(cfg.max_workers || 3, 3);
       let idx = 0;
+      let fetchErrors = 0;
+      let lastFetchError = "";
 
       async function worker() {
         while (idx < universe.length) {
           if (hooks?.shouldStop?.()) return;
           const i = idx++;
           const row = universe[i];
-          await sleep((cfg.request_delay || 0.2) * 1000);
+          await sleep((cfg.request_delay || 0.35) * 1000);
           try {
             const item = await analyzeStock(row, cfg);
             if (item) {
@@ -617,8 +638,9 @@
               state.summary.sort((a, b) => (a.pe_ttm || 999) - (b.pe_ttm || 999));
               hooks?.onPartial?.(state);
             }
-          } catch (_) {
-            /* skip single stock errors */
+          } catch (e) {
+            fetchErrors += 1;
+            if (!lastFetchError) lastFetchError = e.message || String(e);
           }
           state.done += 1;
           state.message = `已处理 ${state.done}/${state.total}，命中 ${state.passed}`;
@@ -631,9 +653,15 @@
       );
 
       state.status = "done";
-      state.message = `本批完成：命中 ${state.passed} / ${state.total}${
+      let doneMsg = `本批完成：命中 ${state.passed} / ${state.total}${
         state.hasMore ? "，可继续下一批" : ""
       }`;
+      if (state.passed === 0 && fetchErrors > state.total * 0.5) {
+        doneMsg += `（${fetchErrors} 只拉取财报失败：${lastFetchError}）`;
+      } else if (state.passed === 0 && fetchErrors === 0) {
+        doneMsg += "（无股票满足 PE/硬性规则，可放宽条件或取消硬性规则）";
+      }
+      state.message = doneMsg;
     } catch (e) {
       state.status = "error";
       state.error = e.message || String(e);

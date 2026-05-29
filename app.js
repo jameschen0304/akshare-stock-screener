@@ -38,7 +38,7 @@ function readForm() {
     revenue_growth_years: Number(fd.get("revenue_growth_years")),
     apply_hard_rules: f.querySelector('[name="apply_hard_rules"]').checked,
     continuous_scan: f.querySelector('[name="continuous_scan"]')?.checked,
-    request_delay: 0.25,
+    request_delay: 0.35,
   };
 }
 
