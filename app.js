@@ -1,6 +1,11 @@
 let scanState = null;
 let stopScan = false;
 let lastDetails = [];
+let apiJobId = null;
+let apiPollTimer = null;
+
+const apiBase = () =>
+  (window.SCREENER_API_BASE || "").replace(/\/$/, "");
 
 const fmtNum = (n) => {
   if (n == null || Number.isNaN(n)) return "—";
@@ -101,7 +106,78 @@ function showDetail(code) {
   el("detailPanel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+async function startScanApi(cfg) {
+  const base = apiBase();
+  el("progressText").textContent = "正在连接后端…";
+  const res = await fetch(`${base}/api/scan/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cfg),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || res.statusText || "启动失败");
+  }
+  const data = await res.json();
+  apiJobId = data.job_id;
+  if (apiPollTimer) clearInterval(apiPollTimer);
+  apiPollTimer = setInterval(() => pollApiScan(), 1200);
+  await pollApiScan();
+}
+
+async function pollApiScan() {
+  if (!apiJobId) return;
+  const base = apiBase();
+  const res = await fetch(`${base}/api/scan/${apiJobId}/status`);
+  const st = await res.json();
+  const pct = st.total ? Math.round((100 * st.done) / st.total) : 0;
+  el("progressFill").style.width = pct + "%";
+  el("progressText").textContent = `${st.message} (${st.done}/${st.total}，命中 ${st.passed})`;
+
+  if (st.status === "running" && st.passed > 0) {
+    await loadApiResults();
+  }
+  if (st.status === "done" || st.status === "error") {
+    clearInterval(apiPollTimer);
+    apiPollTimer = null;
+    if (st.status === "error") {
+      el("progressText").textContent = "错误: " + (st.error || "未知");
+      return;
+    }
+    await loadApiResults();
+    if (lastDetails.length) el("btnExport").disabled = false;
+  }
+}
+
+async function loadApiResults() {
+  const base = apiBase();
+  const res = await fetch(`${base}/api/scan/${apiJobId}/results`);
+  const data = await res.json();
+  lastDetails = data.details || [];
+  scanState = { results: lastDetails, summary: data.summary || [], passed: data.count || 0 };
+  renderSummary(data.summary || []);
+  el("resultCount").textContent = String(data.count || 0);
+}
+
 async function startScan() {
+  if (apiBase()) {
+    stopScan = false;
+    el("btnStart").disabled = true;
+    el("btnExport").disabled = true;
+    el("progressPanel").hidden = false;
+    el("progressFill").style.width = "0%";
+    el("progressText").textContent = "正在启动（后端模式）…";
+    clearTables();
+    try {
+      await startScanApi(readForm());
+    } catch (e) {
+      el("progressText").textContent = "扫描失败: " + e.message;
+    } finally {
+      el("btnStart").disabled = false;
+    }
+    return;
+  }
+
   if (!window.ScreenerCore) {
     el("progressPanel").hidden = false;
     el("progressText").textContent = "核心脚本未加载";
@@ -146,6 +222,10 @@ async function startScan() {
 }
 
 function exportCsv() {
+  if (apiBase() && apiJobId) {
+    window.location.href = `${apiBase()}/api/scan/${apiJobId}/export`;
+    return;
+  }
   if (!scanState?.results?.length) return;
   ScreenerCore.exportCsv(scanState.results);
 }
