@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>A股选股工具 · PE(TTM) + 财报指标</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="api-banner">
+    本页在浏览器内直接拉取东方财富数据并计算指标，无需部署后端。全市场扫描较慢，建议先用 50–100 只试跑。
+  </div>
+
+  <header class="hero">
+    <div class="hero-inner">
+      <h1>A股选股工具</h1>
+      <p class="subtitle">
+        自算 PE（TTM）· 年报/半年报 · 排除 ST / 科创板 · 可开关硬性规则 ·
+        <a href="https://jameschen0304.github.io/akshare-stock-tool/" style="color:#93c5fd">K线工具</a>
+      </p>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card panel-form">
+      <h2>筛选参数</h2>
+      <form id="scanForm" class="form-grid">
+        <label>
+          <span>市盈率 TTM 下限</span>
+          <input type="number" name="pe_min" value="5" step="0.1" min="0" />
+        </label>
+        <label>
+          <span>市盈率 TTM 上限</span>
+          <input type="number" name="pe_max" value="25" step="0.1" min="0" />
+        </label>
+        <label>
+          <span>展示报告期数（半年报+年报）</span>
+          <input type="number" name="periods" value="6" min="2" max="12" />
+        </label>
+        <label>
+          <span>扫描股票上限（0=全市场，较慢）</span>
+          <input type="number" name="limit" value="80" min="0" max="6000" />
+        </label>
+        <label>
+          <span>并发线程数</span>
+          <input type="number" name="max_workers" value="6" min="1" max="16" />
+        </label>
+        <label>
+          <span>最低流动比率</span>
+          <input type="number" name="min_current_ratio" value="1" step="0.1" min="0" />
+        </label>
+        <label>
+          <span>收入连增（连续年报数）</span>
+          <input type="number" name="revenue_growth_years" value="3" min="2" max="5" />
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="apply_hard_rules" checked />
+          <span>仅保留通过硬性规则的股票（流动比率 + 连续年报收入递增）</span>
+        </label>
+      </form>
+      <div class="actions">
+        <button type="button" id="btnStart" class="btn primary">开始扫描</button>
+        <button type="button" id="btnExport" class="btn" disabled>导出 CSV</button>
+      </div>
+      <p class="hint">
+        数据在本地浏览器请求东方财富接口。若遇跨域失败，请刷新重试或换用 Chrome；也可本地运行
+        <code>python scripts/stock_screener_web/app.py</code>。
+      </p>
+    </section>
+
+    <section class="card panel-progress" id="progressPanel" hidden>
+      <h2>扫描进度</h2>
+      <div class="progress-bar"><div id="progressFill"></div></div>
+      <p id="progressText" class="progress-text">准备中…</p>
+    </section>
+
+    <section class="card panel-summary">
+      <h2>结果摘要 <span id="resultCount" class="badge">0</span></h2>
+      <div class="table-wrap">
+        <table id="summaryTable">
+          <thead>
+            <tr>
+              <th>代码</th>
+              <th>名称</th>
+              <th>PE(TTM)</th>
+              <th>总市值</th>
+              <th>最新报告期</th>
+              <th>毛利率</th>
+              <th>净利率</th>
+              <th>流动比率</th>
+              <th>硬性规则</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card panel-detail" id="detailPanel" hidden>
+      <h2>分期指标 <span id="detailTitle"></span></h2>
+      <div class="table-wrap">
+        <table id="detailTable">
+          <thead>
+            <tr>
+              <th>报告期</th>
+              <th>类型</th>
+              <th>营业总收入</th>
+              <th>营业总成本</th>
+              <th>归母扣非净利润</th>
+              <th>毛利润</th>
+              <th>毛利率</th>
+              <th>净利率</th>
+              <th>流动资产</th>
+              <th>流动负债</th>
+              <th>流动比率</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>数据来自东方财富 · 由 akshare 拉取 · 仅供研究，不构成投资建议</p>
+  </footer>
+  <script src="config.js"></script>
+  <script src="screener-core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
