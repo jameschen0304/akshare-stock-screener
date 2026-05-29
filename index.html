@@ -8,8 +8,10 @@
 </head>
 <body>
   <div class="api-banner">
-    财报通过 JSONP 拉取（适配 GitHub Pages）。若仍失败，请本地运行
-    <code>python scripts/stock_screener_web/app.py</code> 打开 http://127.0.0.1:8765（最稳定）。建议先用 20–50 只试跑。
+    GitHub Pages 拉财报需配置代理或本地后端。
+    <strong>推荐</strong>：<code>python scripts/stock_screener_web/app.py</code> →
+    <a href="http://127.0.0.1:8765">http://127.0.0.1:8765</a>。
+    或在 <code>config.js</code> 设置 <code>SCREENER_PROXY_BASE</code>（见 cloudflare-worker/README.md）。
   </div>
 
   <header class="hero">
@@ -134,8 +136,8 @@
   <footer class="footer">
     <p>数据来自东方财富 · 由 akshare 拉取 · 仅供研究，不构成投资建议</p>
   </footer>
-  <script src="config.js?v=10"></script>
-  <script src="screener-core.js?v=10"></script>
-  <script src="app.js?v=10"></script>
+  <script src="config.js?v=11"></script>
+  <script src="screener-core.js?v=11"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

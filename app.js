@@ -275,6 +275,14 @@ async function runBrowserScanLoop() {
   }
 }
 
+function warnIfNoFinanceBackend() {
+  if (apiBase()) return;
+  if (window.SCREENER_PROXY_BASE) return;
+  el("progressPanel").hidden = false;
+  el("progressText").textContent =
+    "提示：在线版拉财报需配置 SCREENER_PROXY_BASE 或本地运行 app.py，否则可能全部失败";
+}
+
 async function startScan() {
   if (apiBase()) {
     stopScan = false;
@@ -306,6 +314,7 @@ async function startScan() {
   el("progressPanel").hidden = false;
   el("progressFill").style.width = "0%";
   el("progressText").textContent = "正在启动（浏览器直连东方财富）…";
+  warnIfNoFinanceBackend();
   clearTables();
 
   try {
