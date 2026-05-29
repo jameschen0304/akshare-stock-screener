@@ -133,13 +133,29 @@
     if (custom) {
       list.push((u) => custom + "?url=" + encodeURIComponent(u));
     }
+    if (navigator.serviceWorker) {
+      list.push((u) => {
+        const proxy = new URL("em-proxy", location.href);
+        proxy.searchParams.set("url", u);
+        return proxy.href;
+      });
+    }
     list.push(
-      (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-      (u) => "https://corsproxy.io/?" + encodeURIComponent(u),
-      (u) =>
-        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)
+      (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u)
     );
     return list;
+  }
+
+  async function ensureFinanceProxyReady() {
+    if (window.SCREENER_API_BASE || financeProxyBase()) return;
+    try {
+      await window.__screenerSwReady;
+    } catch (_) {
+      /* ignore */
+    }
+    if (navigator.serviceWorker && !navigator.serviceWorker.controller) {
+      await sleep(400);
+    }
   }
 
   /** 行情 push2：浏览器可直连，不走代理 */
@@ -168,10 +184,27 @@
     throw lastErr;
   }
 
-  /** 财报 / emweb / datacenter：经代理拉取（GitHub Pages 必需配置 SCREENER_PROXY_BASE 或公共代理） */
+  /** 财报：优先 Service Worker 同域代理（GitHub Pages 可用） */
   async function emFetchFinance(url, params, label) {
+    await ensureFinanceProxyReady();
     const full = url + "?" + new URLSearchParams(params).toString();
     const errors = [];
+
+    for (const build of financeProxyBuilders()) {
+      try {
+        const proxyUrl = build(full);
+        const r = await fetch(proxyUrl, { method: "GET", credentials: "omit" });
+        const text = await r.text();
+        if (!r.ok) {
+          errors.push("HTTP" + r.status);
+          continue;
+        }
+        if (!isHtmlBody(text)) return parseEmJson(text, label);
+        errors.push("HTML");
+      } catch (e) {
+        errors.push(e.message || String(e));
+      }
+    }
 
     try {
       const r = await fetch(full, {
@@ -181,31 +214,16 @@
       });
       const text = await r.text();
       if (r.ok && !isHtmlBody(text)) return parseEmJson(text, label);
-      errors.push(r.ok ? "直连HTML" : "直连HTTP" + r.status);
-    } catch (e) {
-      errors.push("直连:" + (e.message || e));
+    } catch (_) {
+      /* CORS */
     }
 
-    for (const build of financeProxyBuilders()) {
-      try {
-        const proxyUrl = build(full);
-        const r = await fetch(proxyUrl, { method: "GET", credentials: "omit" });
-        const text = await r.text();
-        if (!r.ok) {
-          errors.push("代理HTTP" + r.status);
-          continue;
-        }
-        if (!isHtmlBody(text)) return parseEmJson(text, label);
-        errors.push("代理HTML");
-      } catch (e) {
-        errors.push(e.message || String(e));
-      }
-    }
-
-    const hint = financeProxyBase()
-      ? ""
-      : "。请在 config.js 设置 SCREENER_PROXY_BASE（见 cloudflare-worker/README.md）或本地运行 app.py";
-    throw new Error((label || "财报") + "不可用: " + errors.slice(0, 3).join("; ") + hint);
+    throw new Error(
+      (label || "财报") +
+        "不可用: " +
+        errors.slice(0, 3).join("; ") +
+        "。请刷新页面重试，或运行 scripts/stock_screener_web/run_local.bat"
+    );
   }
 
   function normalizeDiff(diff) {

@@ -7,11 +7,9 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="api-banner">
-    GitHub Pages 拉财报需配置代理或本地后端。
-    <strong>推荐</strong>：<code>python scripts/stock_screener_web/app.py</code> →
-    <a href="http://127.0.0.1:8765">http://127.0.0.1:8765</a>。
-    或在 <code>config.js</code> 设置 <code>SCREENER_PROXY_BASE</code>（见 cloudflare-worker/README.md）。
+  <div class="api-banner" id="apiBanner">
+    在线版已自动启用 Service Worker 代理财报（无需额外配置）。若扫描失败，请<strong>刷新页面</strong>后重试，或运行
+    <code>scripts/stock_screener_web/run_local.bat</code> 使用本地版。
   </div>
 
   <header class="hero">
@@ -136,8 +134,8 @@
   <footer class="footer">
     <p>数据来自东方财富 · 由 akshare 拉取 · 仅供研究，不构成投资建议</p>
   </footer>
-  <script src="config.js?v=11"></script>
-  <script src="screener-core.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="config.js?v=12"></script>
+  <script src="screener-core.js?v=12"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>
