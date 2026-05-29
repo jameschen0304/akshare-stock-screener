@@ -39,16 +39,21 @@
   function parseEmJson(text, label) {
     if (isHtmlBody(text)) {
       throw new Error(
-        (label || "接口") + "返回了网页而非数据（可能被限流），请稍后重试或本地运行 app.py"
+        (label || "接口") + "返回了网页而非数据（代理未生效），请 Ctrl+F5 刷新或本地运行 app.py"
       );
     }
+    let data;
     try {
-      return JSON.parse(text);
+      data = JSON.parse(text);
     } catch (e) {
       throw new Error(
         (label || "接口") + " JSON 解析失败: " + (e.message || e)
       );
     }
+    if (data && data.success === false) {
+      throw new Error((label || "接口") + ": " + (data.message || "请求失败"));
+    }
+    return data;
   }
 
   const CLIST_URL = "https://push2.eastmoney.com/api/qt/clist/get";
@@ -138,28 +143,41 @@
   }
 
   async function proxyFetchText(fullUrl, label) {
+    const errors = [];
     if (typeof window.screenerProxyFetch === "function") {
       try {
         return await window.screenerProxyFetch(fullUrl);
       } catch (e) {
-        /* fall through */
+        errors.push(e.message || String(e));
       }
     }
     const custom = financeProxyBase();
     if (custom) {
-      const r = await fetch(
-        custom + "?url=" + encodeURIComponent(fullUrl),
-        { credentials: "omit" }
-      );
-      const text = await r.text();
-      if (r.ok && !isHtmlBody(text)) return text;
+      try {
+        const r = await fetch(
+          custom + "?url=" + encodeURIComponent(fullUrl),
+          { credentials: "omit" }
+        );
+        const text = await r.text();
+        if (r.ok && !isHtmlBody(text)) return text;
+        errors.push(`CF代理 HTTP ${r.status}`);
+      } catch (e) {
+        errors.push(e.message || String(e));
+      }
     }
-    const proxy = new URL("em-proxy", location.href);
-    proxy.searchParams.set("url", fullUrl);
-    const r2 = await fetch(proxy.href, { credentials: "omit" });
-    const text2 = await r2.text();
-    if (r2.ok && !isHtmlBody(text2)) return text2;
-    throw new Error((label || "财报") + "代理请求失败");
+    try {
+      const proxy = new URL("em-proxy", location.href);
+      proxy.searchParams.set("url", fullUrl);
+      const r2 = await fetch(proxy.href, { credentials: "omit" });
+      const text2 = await r2.text();
+      if (r2.ok && !isHtmlBody(text2)) return text2;
+      errors.push(r2.ok ? "em-proxy 返回 HTML" : `em-proxy HTTP ${r2.status}`);
+    } catch (e) {
+      errors.push(e.message || String(e));
+    }
+    throw new Error(
+      (label || "财报") + "代理失败: " + (errors.join("; ") || "未知")
+    );
   }
 
   /** 行情 push2：浏览器可直连，不走代理 */
@@ -341,6 +359,22 @@
   }
 
   const COMPANY_TYPES = ["4", "3", "1"];
+  const _companyTypeCache = new Map();
+
+  async function fetchCompanyType(emSymbol) {
+    if (_companyTypeCache.has(emSymbol)) {
+      return _companyTypeCache.get(emSymbol);
+    }
+    const indexUrl =
+      "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/Index" +
+      "?type=web&code=" +
+      encodeURIComponent(emSymbol.toLowerCase());
+    const html = await proxyFetchText(indexUrl, "公司类型");
+    const m = html.match(/id=["']hidctype["'][^>]*value=["'](\d+)["']/i);
+    const ct = m ? m[1] : null;
+    if (ct) _companyTypeCache.set(emSymbol, ct);
+    return ct;
+  }
 
   async function fetchSheetDatacenter(emSymbol, kind) {
     const secu = toSecucode(emSymbol);
@@ -406,19 +440,26 @@
   }
 
   async function fetchSheet(emSymbol, kind) {
-    const rows = await fetchSheetDatacenter(emSymbol, kind);
-    if (rows.length) return rows;
-
-    let lastErr = null;
-    for (const companyType of COMPANY_TYPES) {
-      try {
-        const emwebRows = await fetchSheetEmweb(emSymbol, kind, companyType);
-        if (emwebRows.length) return emwebRows;
-      } catch (e) {
-        lastErr = e;
+    try {
+      const rows = await fetchSheetDatacenter(emSymbol, kind);
+      if (rows.length) return rows;
+    } catch (dcErr) {
+      const companyType = await fetchCompanyType(emSymbol).catch(() => null);
+      const types = companyType
+        ? [companyType, ...COMPANY_TYPES.filter((t) => t !== companyType)]
+        : COMPANY_TYPES;
+      let lastErr = dcErr;
+      for (const ct of types) {
+        try {
+          const emwebRows = await fetchSheetEmweb(emSymbol, kind, ct);
+          if (emwebRows.length) return emwebRows;
+        } catch (e) {
+          lastErr = e;
+        }
       }
+      throw lastErr;
     }
-    throw lastErr || new Error("财报无数据或接口失败");
+    return [];
   }
 
   function extractProfit(rows) {
@@ -636,7 +677,9 @@
         return state;
       }
 
-      const concurrency = Math.min(cfg.max_workers || 2, 2);
+      const concurrency = window.SCREENER_API_BASE
+        ? Math.min(cfg.max_workers || 2, 4)
+        : 1;
       let idx = 0;
       let fetchErrors = 0;
       let lastFetchError = "";
