@@ -172,6 +172,17 @@ body {
   border-radius: 4px;
 }
 
+.hint-row {
+  grid-column: 1 / -1;
+  cursor: default;
+}
+
+.hint-inline {
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .progress-bar {
   height: 8px;
   background: var(--surface2);

@@ -54,6 +54,9 @@
           <span>收入连增（连续年报数）</span>
           <input type="number" name="revenue_growth_years" value="3" min="2" max="5" />
         </label>
+        <label class="checkbox-row hint-row">
+          <span class="hint-inline">提示：收入连增 4 年时，请把「展示报告期数」设为 ≥8；PE 5–25 + 硬性规则较严，可先取消硬性规则试跑。</span>
+        </label>
         <label class="checkbox-row">
           <input type="checkbox" name="apply_hard_rules" checked />
           <span>仅保留通过硬性规则的股票（流动比率 + 连续年报收入递增）</span>
@@ -131,8 +134,8 @@
   <footer class="footer">
     <p>数据来自东方财富 · 由 akshare 拉取 · 仅供研究，不构成投资建议</p>
   </footer>
-  <script src="config.js?v=5"></script>
-  <script src="screener-core.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <script src="config.js?v=6"></script>
+  <script src="screener-core.js?v=6"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

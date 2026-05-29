@@ -80,6 +80,14 @@
     return Number.isFinite(n) ? n : null;
   }
 
+  /** 行情列表 f20 多为「万元」，单股 f116 为「元」 */
+  function normalizeMarketCap(cap) {
+    const n = num(cap);
+    if (n == null || n <= 0) return null;
+    if (n < 1e10) return n * 10000;
+    return n;
+  }
+
   function pct(v) {
     if (v == null || !Number.isFinite(v)) return null;
     return `${(v * 100).toFixed(2)}%`;
@@ -150,7 +158,7 @@
       .map((r) => ({
         code: padCode(r.f12),
         name: r.f14,
-        market_cap: num(r.f20),
+        market_cap: normalizeMarketCap(r.f20),
         em_symbol: toEmSymbol(r.f12),
       }))
       .filter(
@@ -235,7 +243,7 @@
         secid: `${market}.${c}`,
       }
     );
-    return num(data?.data?.f116);
+    return normalizeMarketCap(data?.data?.f116);
   }
 
   async function fetchSheet(emSymbol, kind) {
@@ -365,21 +373,20 @@
     });
   }
 
-  function annualRevenueIncreasing(metrics, years) {
-    const annual = metrics
-      .filter((m) => m.report_date.endsWith("-12-31"))
+  function annualRevenueIncreasing(profitRows, years) {
+    const annual = profitRows
+      .filter((p) => p.report_date.endsWith("-12-31") && p.revenue != null)
       .sort((a, b) => (a.report_date > b.report_date ? 1 : -1));
     if (annual.length < years) return false;
     const tail = annual.slice(-years);
-    const revs = tail.map((m) => m.revenue);
-    if (revs.some((r) => r == null)) return false;
+    const revs = tail.map((p) => p.revenue);
     for (let i = 0; i < revs.length - 1; i++) {
       if (!(revs[i] < revs[i + 1])) return false;
     }
     return true;
   }
 
-  function passesHardRules(metrics, cfg) {
+  function passesHardRules(metrics, profitRows, cfg) {
     const reasons = [];
     if (!metrics.length) return { ok: false, reasons: ["无财报数据"] };
     const latest = metrics[metrics.length - 1];
@@ -389,8 +396,14 @@
     ) {
       reasons.push(`流动比率<${cfg.min_current_ratio}`);
     }
-    if (!annualRevenueIncreasing(metrics, cfg.revenue_growth_years)) {
-      reasons.push(`最近${cfg.revenue_growth_years}个年报收入未连增`);
+    const needYears = cfg.revenue_growth_years;
+    const maxYearsFromPeriods = Math.max(2, Math.floor((cfg.periods || 6) / 2));
+    if (needYears > maxYearsFromPeriods) {
+      reasons.push(
+        `收入连增需${needYears}个年报，请把「展示报告期数」调到至少 ${needYears * 2} 或降低连增年数`
+      );
+    } else if (!annualRevenueIncreasing(profitRows, needYears)) {
+      reasons.push(`最近${needYears}个年报收入未连增`);
     }
     return { ok: reasons.length === 0, reasons };
   }
@@ -403,7 +416,7 @@
     if (!profitRows.length || !balanceRows.length) return null;
 
     const ttm = calcTtmDeduct(profitRows);
-    let cap = row.market_cap;
+    let cap = normalizeMarketCap(row.market_cap);
     if (!cap) cap = await fetchMarketCap(row.code);
     if (!cap || !ttm) return null;
     const pe = cap / ttm;
@@ -412,7 +425,7 @@
     const metrics = buildMetrics(profitRows, balanceRows, cfg.periods);
     if (!metrics.length) return null;
 
-    const hard = passesHardRules(metrics, cfg);
+    const hard = passesHardRules(metrics, profitRows, cfg);
     if (cfg.apply_hard_rules && !hard.ok) return null;
 
     const latest = metrics[metrics.length - 1];
