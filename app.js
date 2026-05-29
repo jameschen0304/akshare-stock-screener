@@ -277,11 +277,12 @@ async function runBrowserScanLoop() {
 
 async function prepareBrowserScan() {
   if (apiBase()) return;
-  el("progressText").textContent = "正在启用浏览器代理（Service Worker）…";
-  try {
-    await window.__screenerSwReady;
-  } catch (_) {
-    /* ignore */
+  el("progressText").textContent = "正在启用财报代理（Service Worker）…";
+  const st = await (window.waitScreenerProxy
+    ? window.waitScreenerProxy()
+    : window.__screenerSwReady);
+  if (st && st.ok === false) {
+    throw new Error(st.reason || "财报代理未就绪");
   }
   if (
     navigator.serviceWorker &&
@@ -291,6 +292,9 @@ async function prepareBrowserScan() {
     sessionStorage.setItem("screener-sw-reload", "1");
     location.reload();
     return;
+  }
+  if (navigator.serviceWorker && !navigator.serviceWorker.controller) {
+    throw new Error("财报代理未激活，请按 F5 刷新页面后再点「开始扫描」");
   }
 }
 
@@ -332,6 +336,9 @@ async function startScan() {
     await runBrowserScanLoop();
   } catch (e) {
     el("progressText").textContent = "扫描失败: " + e.message;
+    el("btnStart").disabled = false;
+    setScanningUi(false);
+    return;
   } finally {
     continuousScan = false;
     setScanningUi(false);

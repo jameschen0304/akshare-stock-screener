@@ -127,35 +127,39 @@
     return String(window.SCREENER_PROXY_BASE || "").replace(/\/$/, "");
   }
 
-  function financeProxyBuilders() {
-    const list = [];
-    const custom = financeProxyBase();
-    if (custom) {
-      list.push((u) => custom + "?url=" + encodeURIComponent(u));
-    }
-    if (navigator.serviceWorker) {
-      list.push((u) => {
-        const proxy = new URL("em-proxy", location.href);
-        proxy.searchParams.set("url", u);
-        return proxy.href;
-      });
-    }
-    list.push(
-      (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u)
-    );
-    return list;
-  }
-
   async function ensureFinanceProxyReady() {
     if (window.SCREENER_API_BASE || financeProxyBase()) return;
-    try {
-      await window.__screenerSwReady;
-    } catch (_) {
-      /* ignore */
+    if (typeof window.waitScreenerProxy === "function") {
+      const st = await window.waitScreenerProxy();
+      if (!st.ok) {
+        throw new Error(st.reason || "财报代理未就绪");
+      }
     }
-    if (navigator.serviceWorker && !navigator.serviceWorker.controller) {
-      await sleep(400);
+  }
+
+  async function proxyFetchText(fullUrl, label) {
+    if (typeof window.screenerProxyFetch === "function") {
+      try {
+        return await window.screenerProxyFetch(fullUrl);
+      } catch (e) {
+        /* fall through */
+      }
     }
+    const custom = financeProxyBase();
+    if (custom) {
+      const r = await fetch(
+        custom + "?url=" + encodeURIComponent(fullUrl),
+        { credentials: "omit" }
+      );
+      const text = await r.text();
+      if (r.ok && !isHtmlBody(text)) return text;
+    }
+    const proxy = new URL("em-proxy", location.href);
+    proxy.searchParams.set("url", fullUrl);
+    const r2 = await fetch(proxy.href, { credentials: "omit" });
+    const text2 = await r2.text();
+    if (r2.ok && !isHtmlBody(text2)) return text2;
+    throw new Error((label || "财报") + "代理请求失败");
   }
 
   /** 行情 push2：浏览器可直连，不走代理 */
@@ -184,26 +188,22 @@
     throw lastErr;
   }
 
-  /** 财报：优先 Service Worker 同域代理（GitHub Pages 可用） */
+  /** 财报：经 Service Worker 消息代理（GitHub Pages） */
   async function emFetchFinance(url, params, label) {
     await ensureFinanceProxyReady();
     const full = url + "?" + new URLSearchParams(params).toString();
-    const errors = [];
 
-    for (const build of financeProxyBuilders()) {
-      try {
-        const proxyUrl = build(full);
-        const r = await fetch(proxyUrl, { method: "GET", credentials: "omit" });
-        const text = await r.text();
-        if (!r.ok) {
-          errors.push("HTTP" + r.status);
-          continue;
-        }
-        if (!isHtmlBody(text)) return parseEmJson(text, label);
-        errors.push("HTML");
-      } catch (e) {
-        errors.push(e.message || String(e));
-      }
+    if (!window.SCREENER_API_BASE && !financeProxyBase()) {
+      const text = await proxyFetchText(full, label);
+      return parseEmJson(text, label);
+    }
+
+    const errors = [];
+    try {
+      const text = await proxyFetchText(full, label);
+      return parseEmJson(text, label);
+    } catch (e) {
+      errors.push(e.message || String(e));
     }
 
     try {
@@ -219,10 +219,8 @@
     }
 
     throw new Error(
-      (label || "财报") +
-        "不可用: " +
-        errors.slice(0, 3).join("; ") +
-        "。请刷新页面重试，或运行 scripts/stock_screener_web/run_local.bat"
+      (label || "财报") + "不可用: " + errors.join("; ") +
+        "。请 F5 刷新后重试，或运行 scripts/stock_screener_web/run_local.bat"
     );
   }
 
@@ -363,7 +361,11 @@
       },
       "财报数据中心"
     );
-    return data?.result?.data || [];
+    const rows = data?.result?.data;
+    if (!rows || !rows.length) {
+      throw new Error("数据中心返回空财报");
+    }
+    return rows;
   }
 
   async function fetchSheetEmweb(emSymbol, kind, companyType) {
@@ -404,22 +406,19 @@
   }
 
   async function fetchSheet(emSymbol, kind) {
-    let lastErr;
-    try {
-      const rows = await fetchSheetDatacenter(emSymbol, kind);
-      if (rows.length) return rows;
-    } catch (e) {
-      lastErr = e;
-    }
+    const rows = await fetchSheetDatacenter(emSymbol, kind);
+    if (rows.length) return rows;
+
+    let lastErr = null;
     for (const companyType of COMPANY_TYPES) {
       try {
-        const rows = await fetchSheetEmweb(emSymbol, kind, companyType);
-        if (rows.length) return rows;
+        const emwebRows = await fetchSheetEmweb(emSymbol, kind, companyType);
+        if (emwebRows.length) return emwebRows;
       } catch (e) {
         lastErr = e;
       }
     }
-    throw lastErr || new Error("财报拉取失败");
+    throw lastErr || new Error("财报无数据或接口失败");
   }
 
   function extractProfit(rows) {
@@ -637,7 +636,7 @@
         return state;
       }
 
-      const concurrency = Math.min(cfg.max_workers || 3, 3);
+      const concurrency = Math.min(cfg.max_workers || 2, 2);
       let idx = 0;
       let fetchErrors = 0;
       let lastFetchError = "";
