@@ -16,6 +16,15 @@
   const EM_UT =
     "bd1d9ddb04089700cf9c27f6f7426281";
 
+  const EM_HEADERS = {
+    Accept: "application/json, text/plain, */*",
+    Referer: "https://quote.eastmoney.com/",
+  };
+
+  const CLIST_URL = "https://push2.eastmoney.com/api/qt/clist/get";
+  const CLIST_PAGE_SIZE = 100;
+  const CLIST_MAX_PAGES_BROWSER = 30;
+
   function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
   }
@@ -29,6 +38,12 @@
     return c.startsWith("5") || c.startsWith("6") || c.startsWith("9")
       ? `SH${c}`
       : `SZ${c}`;
+  }
+
+  function toSecucode(emSymbol) {
+    const market = emSymbol.slice(0, 2);
+    const code = emSymbol.slice(2);
+    return `${code}.${market}`;
   }
 
   function normalizeDate(v) {
@@ -57,22 +72,44 @@
   }
 
   async function emFetchRaw(url) {
-    const opts = {
-      method: "GET",
-      credentials: "omit",
-      headers: { Accept: "*/*" },
-    };
+    const errors = [];
     try {
-      const r = await fetch(url, opts);
+      const r = await fetch(url, {
+        method: "GET",
+        credentials: "omit",
+        headers: EM_HEADERS,
+      });
       if (r.ok) return await r.text();
-    } catch (_) {
-      /* direct failed */
+      errors.push(`直连 HTTP ${r.status}`);
+    } catch (e) {
+      errors.push(`直连: ${e.message || e}`);
     }
-    const proxy =
-      "https://api.allorigins.win/raw?url=" + encodeURIComponent(url);
-    const r2 = await fetch(proxy);
-    if (!r2.ok) throw new Error(`请求失败: ${url}`);
-    return await r2.text();
+
+    const proxies = [
+      (u) => "https://api.allorigins.win/get?url=" + encodeURIComponent(u),
+      (u) => "https://corsproxy.io/?" + encodeURIComponent(u),
+    ];
+    for (const build of proxies) {
+      try {
+        const proxyUrl = build(url);
+        const r = await fetch(proxyUrl, { method: "GET", credentials: "omit" });
+        if (!r.ok) {
+          errors.push(`代理 HTTP ${r.status}`);
+          continue;
+        }
+        const text = await r.text();
+        if (proxyUrl.includes("allorigins.win/get")) {
+          const wrap = JSON.parse(text);
+          if (wrap?.contents != null) return wrap.contents;
+        }
+        return text;
+      } catch (e) {
+        errors.push(`代理: ${e.message || e}`);
+      }
+    }
+    throw new Error(
+      "无法访问东方财富（CORS/网络）。请换 Chrome、关闭广告拦截，或本地运行 python scripts/stock_screener_web/app.py；也可在 config.js 设置 SCREENER_API_BASE。"
+    );
   }
 
   async function emFetchJson(url, params) {
@@ -81,33 +118,21 @@
     return JSON.parse(text);
   }
 
-  async function loadUniverse() {
-    const base =
-      "https://82.push2.eastmoney.com/api/qt/clist/get";
-    const baseParams = {
-      pz: "100",
-      po: "1",
-      np: "1",
-      ut: EM_UT,
-      fltt: "2",
-      invt: "2",
-      fid: "f12",
-      fs: "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048",
-      fields: "f12,f14,f20",
-    };
-    const rows = [];
-    let pn = 1;
-    let totalPage = 1;
-    while (pn <= totalPage) {
-      const data = await emFetchJson(base, { ...baseParams, pn: String(pn) });
-      const diff = data?.data?.diff || [];
-      const per = diff.length || 100;
-      totalPage = Math.ceil((data?.data?.total || per) / per);
-      rows.push(...diff);
-      pn += 1;
-      if (pn <= totalPage) await sleep(400);
+  async function emFetchJsonRetry(url, params, retries = 3) {
+    let lastErr;
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await emFetchJson(url, params);
+      } catch (e) {
+        lastErr = e;
+        if (i < retries - 1) await sleep(600 * (i + 1));
+      }
     }
-    return rows
+    throw lastErr;
+  }
+
+  function mapUniverseRows(raw) {
+    return raw
       .map((r) => ({
         code: padCode(r.f12),
         name: r.f14,
@@ -121,6 +146,54 @@
           !isSt(s.name) &&
           !isStar(s.code)
       );
+  }
+
+  /** needCount>0 时只拉取满足扫描数量所需的页，避免全市场分页在浏览器里失败 */
+  async function loadUniverse(needCount = 0) {
+    const baseParams = {
+      pz: String(CLIST_PAGE_SIZE),
+      po: "1",
+      np: "1",
+      ut: EM_UT,
+      fltt: "2",
+      invt: "2",
+      fid: "f12",
+      fs: "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048",
+      fields: "f12,f14,f20",
+    };
+    const raw = [];
+    let pn = 1;
+    let totalPage = 1;
+    const maxPages =
+      needCount > 0
+        ? Math.min(
+            Math.ceil((needCount * 1.4) / CLIST_PAGE_SIZE) + 1,
+            CLIST_MAX_PAGES_BROWSER
+          )
+        : CLIST_MAX_PAGES_BROWSER;
+
+    while (pn <= totalPage && pn <= maxPages) {
+      const data = await emFetchJsonRetry(CLIST_URL, {
+        ...baseParams,
+        pn: String(pn),
+      });
+      const diff = data?.data?.diff || [];
+      const per = diff.length || CLIST_PAGE_SIZE;
+      totalPage = Math.ceil((data?.data?.total || per) / per);
+      raw.push(...diff);
+
+      if (needCount > 0) {
+        const filtered = mapUniverseRows(raw);
+        if (filtered.length >= needCount) return filtered.slice(0, needCount);
+      }
+
+      pn += 1;
+      if (pn <= totalPage && pn <= maxPages) await sleep(500);
+    }
+
+    const all = mapUniverseRows(raw);
+    if (needCount > 0) return all.slice(0, needCount);
+    return all;
   }
 
   async function fetchMarketCap(code) {
@@ -138,49 +211,25 @@
     return num(data?.data?.f116);
   }
 
-  async function getCompanyType(emSymbol) {
-    const url = `https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/Index?type=web&code=${emSymbol.toLowerCase()}`;
-    const html = await emFetchRaw(url);
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const el = doc.querySelector("#hidctype");
-    return el?.getAttribute("value") || "4";
-  }
-
   async function fetchSheet(emSymbol, kind) {
-    const companyType = await getCompanyType(emSymbol);
+    const secu = toSecucode(emSymbol);
     const isProfit = kind === "profit";
-    const dateUrl = isProfit
-      ? "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/lrbDateAjaxNew"
-      : "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/zcfzbDateAjaxNew";
-    const dataUrl = isProfit
-      ? "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/lrbAjaxNew"
-      : "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/zcfzbAjaxNew";
-
-    const dateJson = await emFetchJson(dateUrl, {
-      companyType,
-      reportDateType: "0",
-      code: emSymbol,
-    });
-    const dates = (dateJson.data || [])
-      .map((d) => normalizeDate(d.REPORT_DATE))
-      .filter(Boolean);
-    const chunks = [];
-    for (let i = 0; i < dates.length; i += 5) {
-      chunks.push(dates.slice(i, i + 5).join(","));
-    }
-    let all = [];
-    for (const datesChunk of chunks) {
-      const part = await emFetchJson(dataUrl, {
-        companyType,
-        reportDateType: "0",
-        reportType: "1",
-        dates: datesChunk,
-        code: emSymbol,
-      });
-      if (part?.data) all = all.concat(part.data);
-      await sleep(200);
-    }
-    return all;
+    const data = await emFetchJson(
+      "https://datacenter.eastmoney.com/securities/api/data/get",
+      {
+        type: isProfit ? "RPT_F10_FINANCE_GINCOME" : "RPT_F10_FINANCE_GBALANCE",
+        sty: isProfit ? "APP_F10_GINCOME" : "F10_FINANCE_GBALANCE",
+        filter: `(SECUCODE="${secu}")`,
+        p: "1",
+        ps: "200",
+        sr: "-1",
+        st: "REPORT_DATE",
+        source: "HSF10",
+        client: "PC",
+        v: String(Date.now()),
+      }
+    );
+    return data?.result?.data || [];
   }
 
   function extractProfit(rows) {
@@ -372,8 +421,9 @@
     hooks?.onProgress?.(state);
 
     try {
-      let universe = await loadUniverse();
-      if (cfg.limit > 0) universe = universe.slice(0, cfg.limit);
+      const scanLimit = cfg.limit > 0 ? cfg.limit : 0;
+      let universe = await loadUniverse(scanLimit || 500);
+      if (scanLimit > 0) universe = universe.slice(0, scanLimit);
       state.total = universe.length;
       state.message = `共 ${state.total} 只股票待分析`;
       hooks?.onProgress?.(state);

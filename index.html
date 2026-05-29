@@ -8,7 +8,8 @@
 </head>
 <body>
   <div class="api-banner">
-    本页在浏览器内直接拉取东方财富数据并计算指标，无需部署后端。全市场扫描较慢，建议先用 50–100 只试跑。
+    本页在浏览器内拉取东方财富数据。若出现「Failed to fetch」，请换 Chrome、关闭广告拦截后刷新；或本地运行
+    <code>python scripts/stock_screener_web/app.py</code> 打开 http://127.0.0.1:8765 。建议先用 50–100 只试跑。
   </div>
 
   <header class="hero">
@@ -125,8 +126,8 @@
   <footer class="footer">
     <p>数据来自东方财富 · 由 akshare 拉取 · 仅供研究，不构成投资建议</p>
   </footer>
-  <script src="config.js"></script>
-  <script src="screener-core.js"></script>
-  <script src="app.js"></script>
+  <script src="config.js?v=3"></script>
+  <script src="screener-core.js?v=3"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
