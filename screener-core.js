@@ -23,7 +23,21 @@
 
   const CLIST_URL = "https://push2.eastmoney.com/api/qt/clist/get";
   const CLIST_PAGE_SIZE = 100;
-  const CLIST_MAX_PAGES_BROWSER = 30;
+  const CLIST_MAX_PAGES_BROWSER = 55;
+
+  let _universeRaw = [];
+  let _universeFiltered = [];
+  let _universeNextPage = 1;
+  let _universeTotalPages = 1;
+  let _universeExhausted = false;
+
+  function resetUniverseCache() {
+    _universeRaw = [];
+    _universeFiltered = [];
+    _universeNextPage = 1;
+    _universeTotalPages = 1;
+    _universeExhausted = false;
+  }
 
   function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
@@ -148,53 +162,65 @@
       );
   }
 
-  /** needCount>0 时只拉取所需页；skipCount 用于连续扫描的下一批偏移 */
-  async function loadUniverse(needCount = 0, skipCount = 0) {
-    const baseParams = {
-      pz: String(CLIST_PAGE_SIZE),
-      po: "1",
-      np: "1",
-      ut: EM_UT,
-      fltt: "2",
-      invt: "2",
-      fid: "f12",
-      fs: "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048",
-      fields: "f12,f14,f20",
-    };
-    const raw = [];
-    let pn = 1;
-    let totalPage = 1;
-    const want = skipCount + (needCount > 0 ? needCount : 0);
-    const maxPages =
-      want > 0
-        ? Math.min(
-            Math.ceil((want * 1.4) / CLIST_PAGE_SIZE) + 1,
-            CLIST_MAX_PAGES_BROWSER
-          )
-        : CLIST_MAX_PAGES_BROWSER;
+  const CLIST_BASE_PARAMS = {
+    pz: String(CLIST_PAGE_SIZE),
+    po: "1",
+    np: "1",
+    ut: EM_UT,
+    fltt: "2",
+    invt: "2",
+    fid: "f12",
+    fs: "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048",
+    fields: "f12,f14,f20",
+  };
 
-    while (pn <= totalPage && pn <= maxPages) {
+  /** 增量拉取股票池（连续扫描时从上次页码接着拉，不重复请求前几页） */
+  async function growUniverse(minFilteredCount) {
+    while (
+      !_universeExhausted &&
+      _universeFiltered.length < minFilteredCount &&
+      _universeNextPage <= _universeTotalPages &&
+      _universeNextPage <= CLIST_MAX_PAGES_BROWSER
+    ) {
+      const pn = _universeNextPage;
       const data = await emFetchJsonRetry(CLIST_URL, {
-        ...baseParams,
+        ...CLIST_BASE_PARAMS,
         pn: String(pn),
       });
       const diff = data?.data?.diff || [];
       const per = diff.length || CLIST_PAGE_SIZE;
-      totalPage = Math.ceil((data?.data?.total || per) / per);
-      raw.push(...diff);
+      _universeTotalPages = Math.ceil((data?.data?.total || per) / per);
+      _universeRaw.push(...diff);
+      _universeFiltered = mapUniverseRows(_universeRaw);
+      _universeNextPage = pn + 1;
 
-      const filtered = mapUniverseRows(raw);
-      if (needCount > 0 && filtered.length >= skipCount + needCount) {
-        return filtered.slice(skipCount, skipCount + needCount);
+      if (!diff.length || pn >= _universeTotalPages) {
+        _universeExhausted = true;
       }
-
-      pn += 1;
-      if (pn <= totalPage && pn <= maxPages) await sleep(500);
+      if (
+        _universeNextPage <= _universeTotalPages &&
+        _universeFiltered.length < minFilteredCount &&
+        !_universeExhausted
+      ) {
+        await sleep(500);
+      }
     }
+    return _universeFiltered;
+  }
 
-    const all = mapUniverseRows(raw);
-    if (needCount > 0) return all.slice(skipCount, skipCount + needCount);
-    return all.slice(skipCount);
+  function universeHasMore(skip, batchLen, batchSize) {
+    const end = skip + batchLen;
+    if (end < _universeFiltered.length) return true;
+    if (!_universeExhausted && _universeNextPage <= _universeTotalPages) {
+      return true;
+    }
+    return false;
+  }
+
+  async function loadUniverseBatch(needCount, skipCount) {
+    const want = skipCount + (needCount > 0 ? needCount : 500);
+    await growUniverse(want);
+    return _universeFiltered.slice(skipCount, skipCount + needCount);
   }
 
   async function fetchMarketCap(code) {
@@ -424,13 +450,15 @@
     try {
       const scanLimit = cfg.limit > 0 ? cfg.limit : 0;
       const skip = Math.max(0, cfg.skip || 0);
+      if (skip === 0) resetUniverseCache();
       const batchNo = Math.floor(skip / (scanLimit || 1)) + 1;
-      let universe = await loadUniverse(scanLimit || 500, skip);
-      if (scanLimit > 0) universe = universe.slice(0, scanLimit);
+      const batchSize = scanLimit > 0 ? scanLimit : 500;
+      let universe = await loadUniverseBatch(batchSize, skip);
       state.total = universe.length;
       state.skip = skip;
       state.batch = batchNo;
-      state.hasMore = scanLimit > 0 && universe.length >= scanLimit;
+      state.poolSize = _universeFiltered.length;
+      state.hasMore = universeHasMore(skip, universe.length, batchSize);
       const batchHint =
         skip > 0 ? `（第 ${batchNo} 批，从第 ${skip + 1} 只起）` : "";
       state.message = `本批 ${state.total} 只股票待分析${batchHint}`;
@@ -554,5 +582,5 @@
     URL.revokeObjectURL(a.href);
   }
 
-  global.ScreenerCore = { runScan, exportCsv };
+  global.ScreenerCore = { runScan, exportCsv, resetUniverseCache };
 })(window);

@@ -213,6 +213,7 @@ async function runBrowserScanLoop() {
 
   continuousScan = !!cfg.continuous_scan;
   scanSkip = 0;
+  if (window.ScreenerCore?.resetUniverseCache) ScreenerCore.resetUniverseCache();
   let accumulated = { results: [], summary: [], passed: 0, scanned: 0 };
 
   do {
@@ -238,6 +239,15 @@ async function runBrowserScanLoop() {
     });
 
     if (batchState.status === "error") break;
+
+    if (batchState.total === 0) {
+      if (!batchState.hasMore) break;
+      el("progressText").textContent =
+        "无法加载下一批股票（接口限流或股票池已用尽），已连续扫描 " +
+        accumulated.scanned +
+        " 只";
+      break;
+    }
 
     accumulated = mergeScanResults(accumulated, batchState);
     accumulated.scanned += batchState.total || 0;
