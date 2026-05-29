@@ -58,9 +58,14 @@
           <input type="checkbox" name="apply_hard_rules" checked />
           <span>仅保留通过硬性规则的股票（流动比率 + 连续年报收入递增）</span>
         </label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="continuous_scan" />
+          <span>连续扫描：本批完成后自动扫描下一批（需设置「扫描上限」&gt;0，如 80）</span>
+        </label>
       </form>
       <div class="actions">
         <button type="button" id="btnStart" class="btn primary">开始扫描</button>
+        <button type="button" id="btnStop" class="btn danger" hidden>停止扫描</button>
         <button type="button" id="btnExport" class="btn" disabled>导出 CSV</button>
       </div>
       <p class="hint">
@@ -126,8 +131,8 @@
   <footer class="footer">
     <p>数据来自东方财富 · 由 akshare 拉取 · 仅供研究，不构成投资建议</p>
   </footer>
-  <script src="config.js?v=3"></script>
-  <script src="screener-core.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="config.js?v=4"></script>
+  <script src="screener-core.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

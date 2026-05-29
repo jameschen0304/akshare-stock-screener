@@ -150,6 +150,16 @@ body {
   border-color: var(--accent);
 }
 
+.btn.danger {
+  background: #7f1d1d;
+  border-color: #b91c1c;
+  color: #fecaca;
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: #991b1b;
+}
+
 .hint {
   margin: 1rem 0 0;
   font-size: 0.8rem;

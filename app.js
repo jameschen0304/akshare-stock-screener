@@ -1,5 +1,7 @@
 let scanState = null;
 let stopScan = false;
+let continuousScan = false;
+let scanSkip = 0;
 let lastDetails = [];
 let apiJobId = null;
 let apiPollTimer = null;
@@ -35,14 +37,51 @@ function readForm() {
     min_current_ratio: Number(fd.get("min_current_ratio")),
     revenue_growth_years: Number(fd.get("revenue_growth_years")),
     apply_hard_rules: f.querySelector('[name="apply_hard_rules"]').checked,
+    continuous_scan: f.querySelector('[name="continuous_scan"]')?.checked,
     request_delay: 0.25,
   };
 }
 
-function updateProgress(state) {
+function mergeScanResults(prev, batch) {
+  const results = [...(prev.results || [])];
+  const summary = [...(prev.summary || [])];
+  const codes = new Set(results.map((r) => r.code));
+  for (const item of batch.results || []) {
+    if (codes.has(item.code)) continue;
+    codes.add(item.code);
+    results.push(item);
+  }
+  const sumCodes = new Set(summary.map((r) => r.code));
+  for (const row of batch.summary || []) {
+    if (sumCodes.has(row.code)) continue;
+    sumCodes.add(row.code);
+    summary.push(row);
+  }
+  summary.sort((a, b) => (a.pe_ttm || 999) - (b.pe_ttm || 999));
+  return {
+    results,
+    summary,
+    passed: results.length,
+    scanned: (prev.scanned || 0) + (batch.total || 0),
+  };
+}
+
+function setScanningUi(active) {
+  el("btnStart").disabled = active;
+  el("btnStop").hidden = !active;
+  if (active) {
+    el("btnStart").textContent = continuousScan ? "连续扫描中…" : "扫描中…";
+  } else {
+    el("btnStart").textContent = "开始扫描";
+  }
+}
+
+function updateProgress(state, extra) {
   const pct = state.total ? Math.round((100 * state.done) / state.total) : 0;
   el("progressFill").style.width = pct + "%";
-  el("progressText").textContent = `${state.message} (${state.done}/${state.total}，命中 ${state.passed})`;
+  const cum = extra?.scannedTotal != null ? ` · 累计已扫 ${extra.scannedTotal}` : "";
+  const hits = extra?.totalPassed != null ? extra.totalPassed : state.passed;
+  el("progressText").textContent = `${state.message} (${state.done}/${state.total}，命中 ${hits}${cum})`;
 }
 
 function clearTables() {
@@ -159,6 +198,73 @@ async function loadApiResults() {
   el("resultCount").textContent = String(data.count || 0);
 }
 
+function stopScanNow() {
+  stopScan = true;
+  continuousScan = false;
+  el("progressText").textContent = "正在停止…";
+}
+
+async function runBrowserScanLoop() {
+  const cfg = readForm();
+  if (cfg.continuous_scan && cfg.limit <= 0) {
+    el("progressText").textContent = "连续扫描需将「扫描股票上限」设为大于 0（如 80）";
+    return;
+  }
+
+  continuousScan = !!cfg.continuous_scan;
+  scanSkip = 0;
+  let accumulated = { results: [], summary: [], passed: 0, scanned: 0 };
+
+  do {
+    if (stopScan) break;
+    const batchCfg = { ...cfg, skip: scanSkip };
+    const batchState = await ScreenerCore.runScan(batchCfg, {
+      shouldStop: () => stopScan,
+      onProgress: (state) => {
+        updateProgress(state, {
+          scannedTotal: accumulated.scanned + state.done,
+          totalPassed: accumulated.passed + state.passed,
+        });
+        if (state.status === "error") {
+          el("progressText").textContent = "错误: " + (state.error || "未知");
+        }
+      },
+      onPartial: (state) => {
+        const merged = mergeScanResults(accumulated, state);
+        lastDetails = merged.results;
+        renderSummary(merged.summary);
+        el("resultCount").textContent = String(merged.passed);
+      },
+    });
+
+    if (batchState.status === "error") break;
+
+    accumulated = mergeScanResults(accumulated, batchState);
+    accumulated.scanned += batchState.total || 0;
+    scanState = {
+      results: accumulated.results,
+      summary: accumulated.summary,
+      passed: accumulated.passed,
+    };
+    lastDetails = accumulated.results;
+    renderSummary(accumulated.summary);
+    el("resultCount").textContent = String(accumulated.passed);
+    if (accumulated.passed > 0) el("btnExport").disabled = false;
+
+    if (!continuousScan || stopScan || !batchState.hasMore) break;
+
+    scanSkip += cfg.limit;
+    el("progressText").textContent = `第 ${Math.floor(scanSkip / cfg.limit) + 1} 批准备中…（已扫 ${accumulated.scanned} 只）`;
+    await new Promise((r) => setTimeout(r, 1500));
+  } while (true);
+
+  if (!stopScan && continuousScan) {
+    el("progressText").textContent = `全部批次完成：累计扫描 ${accumulated.scanned} 只，命中 ${accumulated.passed} 只`;
+  } else if (stopScan) {
+    el("progressText").textContent = `已停止：累计扫描 ${accumulated.scanned} 只，命中 ${accumulated.passed} 只`;
+  }
+}
+
 async function startScan() {
   if (apiBase()) {
     stopScan = false;
@@ -185,39 +291,20 @@ async function startScan() {
   }
 
   stopScan = false;
-  el("btnStart").disabled = true;
+  setScanningUi(true);
   el("btnExport").disabled = true;
   el("progressPanel").hidden = false;
   el("progressFill").style.width = "0%";
   el("progressText").textContent = "正在启动（浏览器直连东方财富）…";
   clearTables();
 
-  const cfg = readForm();
-
   try {
-    scanState = await ScreenerCore.runScan(cfg, {
-      shouldStop: () => stopScan,
-      onProgress: (state) => {
-        updateProgress(state);
-        if (state.status === "error") {
-          el("progressText").textContent = "错误: " + (state.error || "未知");
-        }
-      },
-      onPartial: (state) => {
-        lastDetails = state.results;
-        renderSummary(state.summary);
-        el("resultCount").textContent = String(state.passed);
-      },
-    });
-
-    lastDetails = scanState.results || [];
-    renderSummary(scanState.summary || []);
-    el("resultCount").textContent = String(scanState.passed || 0);
-    if (scanState.passed > 0) el("btnExport").disabled = false;
+    await runBrowserScanLoop();
   } catch (e) {
     el("progressText").textContent = "扫描失败: " + e.message;
   } finally {
-    el("btnStart").disabled = false;
+    continuousScan = false;
+    setScanningUi(false);
   }
 }
 
@@ -231,4 +318,5 @@ function exportCsv() {
 }
 
 el("btnStart").addEventListener("click", startScan);
+el("btnStop").addEventListener("click", stopScanNow);
 el("btnExport").addEventListener("click", exportCsv);

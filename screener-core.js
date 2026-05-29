@@ -148,8 +148,8 @@
       );
   }
 
-  /** needCount>0 时只拉取满足扫描数量所需的页，避免全市场分页在浏览器里失败 */
-  async function loadUniverse(needCount = 0) {
+  /** needCount>0 时只拉取所需页；skipCount 用于连续扫描的下一批偏移 */
+  async function loadUniverse(needCount = 0, skipCount = 0) {
     const baseParams = {
       pz: String(CLIST_PAGE_SIZE),
       po: "1",
@@ -164,10 +164,11 @@
     const raw = [];
     let pn = 1;
     let totalPage = 1;
+    const want = skipCount + (needCount > 0 ? needCount : 0);
     const maxPages =
-      needCount > 0
+      want > 0
         ? Math.min(
-            Math.ceil((needCount * 1.4) / CLIST_PAGE_SIZE) + 1,
+            Math.ceil((want * 1.4) / CLIST_PAGE_SIZE) + 1,
             CLIST_MAX_PAGES_BROWSER
           )
         : CLIST_MAX_PAGES_BROWSER;
@@ -182,9 +183,9 @@
       totalPage = Math.ceil((data?.data?.total || per) / per);
       raw.push(...diff);
 
-      if (needCount > 0) {
-        const filtered = mapUniverseRows(raw);
-        if (filtered.length >= needCount) return filtered.slice(0, needCount);
+      const filtered = mapUniverseRows(raw);
+      if (needCount > 0 && filtered.length >= skipCount + needCount) {
+        return filtered.slice(skipCount, skipCount + needCount);
       }
 
       pn += 1;
@@ -192,8 +193,8 @@
     }
 
     const all = mapUniverseRows(raw);
-    if (needCount > 0) return all.slice(0, needCount);
-    return all;
+    if (needCount > 0) return all.slice(skipCount, skipCount + needCount);
+    return all.slice(skipCount);
   }
 
   async function fetchMarketCap(code) {
@@ -422,11 +423,26 @@
 
     try {
       const scanLimit = cfg.limit > 0 ? cfg.limit : 0;
-      let universe = await loadUniverse(scanLimit || 500);
+      const skip = Math.max(0, cfg.skip || 0);
+      const batchNo = Math.floor(skip / (scanLimit || 1)) + 1;
+      let universe = await loadUniverse(scanLimit || 500, skip);
       if (scanLimit > 0) universe = universe.slice(0, scanLimit);
       state.total = universe.length;
-      state.message = `共 ${state.total} 只股票待分析`;
+      state.skip = skip;
+      state.batch = batchNo;
+      state.hasMore = scanLimit > 0 && universe.length >= scanLimit;
+      const batchHint =
+        skip > 0 ? `（第 ${batchNo} 批，从第 ${skip + 1} 只起）` : "";
+      state.message = `本批 ${state.total} 只股票待分析${batchHint}`;
       hooks?.onProgress?.(state);
+
+      if (!universe.length) {
+        state.status = "done";
+        state.hasMore = false;
+        state.message = skip > 0 ? "已无更多股票可扫描" : "股票池为空";
+        hooks?.onProgress?.(state);
+        return state;
+      }
 
       const concurrency = Math.min(cfg.max_workers || 3, 4);
       let idx = 0;
@@ -471,7 +487,9 @@
       );
 
       state.status = "done";
-      state.message = `完成：命中 ${state.passed} / ${state.total}`;
+      state.message = `本批完成：命中 ${state.passed} / ${state.total}${
+        state.hasMore ? "，可继续下一批" : ""
+      }`;
     } catch (e) {
       state.status = "error";
       state.error = e.message || String(e);
