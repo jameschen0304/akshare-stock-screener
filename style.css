@@ -24,6 +24,19 @@ body {
   min-height: 100vh;
 }
 
+tr.row-preview td {
+  opacity: 0.72;
+  color: var(--muted);
+}
+
+.tag-preview {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface2);
+  color: var(--muted);
+}
+
 .api-banner {
   background: #143d2a;
   border-bottom: 1px solid #1a6b4a;

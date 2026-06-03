@@ -25,11 +25,11 @@
       <form id="scanForm" class="form-grid">
         <label>
           <span>市盈率 TTM 下限</span>
-          <input type="number" name="pe_min" value="5" step="0.1" min="0" />
+          <input type="number" name="pe_min" value="3" step="0.1" min="0" />
         </label>
         <label>
           <span>市盈率 TTM 上限</span>
-          <input type="number" name="pe_max" value="25" step="0.1" min="0" />
+          <input type="number" name="pe_max" value="40" step="0.1" min="0" />
         </label>
         <label>
           <span>展示报告期数（半年报+年报）</span>
@@ -52,7 +52,7 @@
           <input type="number" name="revenue_growth_years" value="3" min="2" max="5" />
         </label>
         <label class="checkbox-row hint-row">
-          <span class="hint-inline">提示：收入连增 4 年时，请把「展示报告期数」设为 ≥8；PE 5–25 + 硬性规则较严，可先取消硬性规则试跑。</span>
+          <span class="hint-inline">提示：默认 PE 3–40。若命中为 0，多半是区间仍偏窄，可试 0–60；表格灰色行为「PE 预览」（未入选但已算出 PE）。</span>
         </label>
         <label class="checkbox-row">
           <input type="checkbox" name="apply_hard_rules" />
@@ -131,8 +131,8 @@
   <footer class="footer">
     <p>数据来自东方财富 · 由 akshare 拉取 · 仅供研究，不构成投资建议</p>
   </footer>
-  <script src="config.js?v=16"></script>
-  <script src="screener-core.js?v=16"></script>
-  <script src="app.js?v=16"></script>
+  <script src="config.js?v=17"></script>
+  <script src="screener-core.js?v=17"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>

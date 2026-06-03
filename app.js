@@ -97,9 +97,9 @@ function renderSummary(rows) {
   tbody.innerHTML = rows
     .map(
       (r) => `
-    <tr>
+    <tr class="${r.is_preview ? "row-preview" : ""}">
       <td class="num">${r.code}</td>
-      <td>${r.name}</td>
+      <td>${r.name}${r.is_preview ? " <span class=\"tag-preview\">预览</span>" : ""}</td>
       <td class="num">${r.pe_ttm}</td>
       <td class="num">${fmtNum(r.market_cap)}</td>
       <td>${r.latest_report_date || "—"}</td>
@@ -197,8 +197,16 @@ async function loadApiResults() {
   const res = await fetch(`${base}/api/scan/${apiJobId}/results`);
   const data = await res.json();
   lastDetails = data.details || [];
-  scanState = { results: lastDetails, summary: data.summary || [], passed: data.count || 0 };
-  renderSummary(data.summary || []);
+  const summary = [...(data.summary || [])];
+  const preview = (data.preview || []).map((r) => ({ ...r, is_preview: true }));
+  const rows = summary.length ? summary.concat(preview) : preview;
+  scanState = {
+    results: lastDetails,
+    summary: rows,
+    passed: data.count || 0,
+    stats: data.stats,
+  };
+  renderSummary(rows);
   el("resultCount").textContent = String(data.count || 0);
 }
 
