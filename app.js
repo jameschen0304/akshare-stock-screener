@@ -171,7 +171,11 @@ async function pollApiScan() {
   const st = await res.json();
   const pct = st.total ? Math.round((100 * st.done) / st.total) : 0;
   el("progressFill").style.width = pct + "%";
-  el("progressText").textContent = `${st.message} (${st.done}/${st.total}，命中 ${st.passed})`;
+  const poolHint =
+    st.status === "running" && st.total === 0
+      ? "（加载股票池中，请耐心等待）"
+      : "";
+  el("progressText").textContent = `${st.message} (${st.done}/${st.total}，命中 ${st.passed})${poolHint}`;
 
   if (st.status === "running" && st.passed > 0) {
     await loadApiResults();
@@ -277,10 +281,7 @@ async function runBrowserScanLoop() {
 
 async function prepareBrowserScan() {
   if (apiBase()) {
-    el("apiBanner").innerHTML =
-      "已连接云端后端 <code>" +
-      apiBase() +
-      "</code>（财报由服务器拉取，更稳定）。";
+    if (typeof updateApiBanner === "function") updateApiBanner();
     return;
   }
   el("progressText").textContent = "正在初始化财报代理…";
@@ -325,7 +326,11 @@ async function startScan() {
     try {
       await startScanApi(readForm());
     } catch (e) {
-      el("progressText").textContent = "扫描失败: " + e.message;
+      const msg =
+        e.name === "AbortError"
+          ? "连接云端超时，请直接打开 https://akshare-stock-screener.onrender.com 或运行 run_local.bat"
+          : e.message;
+      el("progressText").textContent = "扫描失败: " + msg;
     } finally {
       el("btnStart").disabled = false;
     }

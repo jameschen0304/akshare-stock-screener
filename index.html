@@ -7,22 +7,7 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <script>
-    (function () {
-      if (!("serviceWorker" in navigator)) return;
-      var v = "14";
-      window.SCREENER_SW_VERSION = v;
-      window.__screenerSwRegister = navigator.serviceWorker
-        .register("./sw.js?v=" + v, { scope: "./", updateViaCache: "none" })
-        .catch(function (e) {
-          console.warn("SW register failed", e);
-        });
-    })();
-  </script>
-  <div class="api-banner" id="apiBanner">
-    在线版已自动启用 Service Worker 代理财报（无需额外配置）。若扫描失败，请<strong>刷新页面</strong>后重试，或运行
-    <code>scripts/stock_screener_web/run_local.bat</code> 使用本地版。
-  </div>
+  <div class="api-banner" id="apiBanner">正在连接云端扫描服务…</div>
 
   <header class="hero">
     <div class="hero-inner">
@@ -146,8 +131,8 @@
   <footer class="footer">
     <p>数据来自东方财富 · 由 akshare 拉取 · 仅供研究，不构成投资建议</p>
   </footer>
-  <script src="config.js?v=15"></script>
-  <script src="screener-core.js?v=14"></script>
-  <script src="app.js?v=14"></script>
+  <script src="config.js?v=16"></script>
+  <script src="screener-core.js?v=16"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>
