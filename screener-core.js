@@ -533,6 +533,14 @@
     return ttm > 0 ? ttm : null;
   }
 
+  function calcSalesNetMargin(deduct, revenue) {
+    if (deduct == null || revenue == null || revenue <= 0) return null;
+    if (deduct > revenue * 1.02) return null;
+    const ratio = deduct / revenue;
+    if (ratio > 1 || ratio < -1) return null;
+    return ratio;
+  }
+
   function buildMetrics(profitRows, balanceRows, periods) {
     const balanceMap = new Map(balanceRows.map((b) => [b.report_date, b]));
     const merged = profitRows
@@ -553,7 +561,7 @@
         revenue != null && operate_cost != null ? revenue - operate_cost : null;
       const gross_margin =
         gross_profit != null && revenue > 0 ? gross_profit / revenue : null;
-      const net_margin = deduct != null && revenue > 0 ? deduct / revenue : null;
+      const net_margin = calcSalesNetMargin(deduct, revenue);
       const current_ratio = ca != null && cl > 0 ? ca / cl : null;
       return {
         report_date: p.report_date,
